@@ -5,27 +5,23 @@ ants 是一个仿写的轻轻量级`websocket`框架,这也是这个名字的由
 ![流程图](https://thumbnail1.baidupcs.com/thumbnail/7058c6a87v680e370314b66eef46ce47?fid=1665266475-250528-345263831835967&rt=pr&sign=FDTAER-DCb740ccc5511e5e8fedcff06b081203-YAOgiEOKJy5QpGksQ574geVDLVo%3d&expires=8h&chkbd=0&chkv=0&dp-logid=8686842231510637079&dp-callid=0&time=1628906400&size=c1536_u864&quality=90&vuk=1665266475&ft=image&autopolicy=1)
 
 
-
 ### 简单使用
 
 `client`
 
 ```go
-func main() {
-	var (
-		conn *ants.Conn
-		err  error
-	)
-	conn,_, err = ants.DefaultDialer.Dial("ws://localhost:8080/ants")
+conn,_, err := ants.DefaultDialer.Dial("ws://localhost:8080/ants")
 	if err != nil {
-		panic(err)
+		log.Println(err)
+		return
 	}
 	go func() {
 		for {
 			if err = conn.WriteMessage(ants.TextMessage,[]byte("hello")); err != nil {
 				fmt.Printf("send failed, err=%v\n", err)
+				return
 			}
-			time.Sleep(3 * time.Second)
+			time.Sleep(1 * time.Second)
 		}
 	}()
 
@@ -33,8 +29,8 @@ func main() {
 		mt, msg, err := conn.ReadMessage()
 		if err != nil {
 			if ce, ok := err.(*ants.CloseError); ok {
-				fmt.Printf("close err=%d, %s", ce.Code, ce.Text)
-				break
+				fmt.Printf("close err=%d, %s\n", ce.Code, ce.Text)
+				return
 			}
 			fmt.Printf("recv failed, err=%v\n", err)
 			time.Sleep(1 * time.Second)
@@ -42,40 +38,33 @@ func main() {
 		}
 		fmt.Printf("messageType=%d, msg=%s\n", mt, msg)
 	}
-}
 ```
 
 `server`
 ```go
-var upgrade =ants.Upgrader{
-	CheckOrigin: func(request *http.Request) bool {
-		return true
-	},
-	Timeout: 10*time.Second,
-	SubProtocols: []string{"chat"},
-}
-
 func main() {
 	http.HandleFunc("/ants",Ants)
-	log.Fatal(http.ListenAndServe("127.0.0.1:8080",nil))
+	log.Fatal(http.ListenAndServe(":8080",nil))
 }
 
-func Ants(w http.ResponseWriter,r *http.Request) {
-	err := upgrade.Upgrade(w, r, func(conn *ants.Conn) {
+func Ants(writer http.ResponseWriter, request *http.Request) {
+	err := ants.DefaultUpgrader.Upgrade(writer, request, func(conn *ants.Conn) {
 		for {
 			mt, message, err := conn.ReadMessage()
 			if err != nil {
-				if closeErr, ok := err.(*ants.CloseError); ok{
-				  fmt.Printf("connclosed,because=%v",closeErr)
+				if closeErr, ok := err.(*ants.CloseError); ok {
+					fmt.Printf("conn closed, because=%v\n", closeErr)
 					break
 				}
-				fmt.Printf("read error, err=%v", err)
-				return
+				fmt.Printf("read error, err=%v\n", err)
+				break
 			}
+
 			fmt.Printf("recv: mt=%d, msg=%s\n", mt, message)
-			err = conn.WriteMessage(ants.TextMessage, message)
+
+			err = conn.WriteMessage(mt, message)
 			if err != nil {
-				fmt.Printf("write error: err=%v", err)
+				fmt.Printf("write error: err=%v\n", err)
 				break
 			}
 		}
@@ -83,16 +72,12 @@ func Ants(w http.ResponseWriter,r *http.Request) {
 	})
 
 	if err != nil {
-		fmt.Printf("upgrade error, err=%v", err)
+		fmt.Printf("upgrade error, err=%v\n", err)
 		return
 	}
 
-	fmt.Printf("conn upgrade done")
+	fmt.Printf("conn upgrade done\n")
 }
-
-
-
-
 ```
 
 
