@@ -16,7 +16,7 @@ func main() {
 
 func Ants(w http.ResponseWriter,r *http.Request) {
 	err:=ants.DefaultUpgrader.Upgrade(w, r, func(conn *ants.Conn) {
-		filepath:="../websocket_frame.jpg"
+		filepath:="../../../statics/websocket_frame.jpg"
 		fd,err:=os.Open(filepath)
 		if err!=nil{
 			log.Println(err)

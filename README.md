@@ -2,8 +2,7 @@
 
 ants 是一个仿写的轻轻量级`websocket`框架,这也是这个名字的由来。框架基本实现了websocket数据帧传输形式,其他的...
 
-![流程图](https://thumbnail1.baidupcs.com/thumbnail/7058c6a87v680e370314b66eef46ce47?fid=1665266475-250528-345263831835967&rt=pr&sign=FDTAER-DCb740ccc5511e5e8fedcff06b081203-YAOgiEOKJy5QpGksQ574geVDLVo%3d&expires=8h&chkbd=0&chkv=0&dp-logid=8686842231510637079&dp-callid=0&time=1628906400&size=c1536_u864&quality=90&vuk=1665266475&ft=image&autopolicy=1)
-
+![流程图](statics/flow-chart.jpg)
 ### 简单使用
 
 `client`

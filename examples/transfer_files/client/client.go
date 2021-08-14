@@ -6,13 +6,12 @@ import (
 	"ants"
 )
 
-
 func main() {
 	conn,_, err := ants.DefaultDialer.Dial("ws://localhost:8080/ants")
 	if err != nil {
 		panic(err)
 	}
-	filepath:="../transfer_websocket_frame.jpg"
+	filepath:="../../../statics/transfer_websocket_frame.jpg"
 
 	err=conn.AcceptFile(filepath)
 	if err != nil {
