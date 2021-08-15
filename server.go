@@ -136,7 +136,7 @@ func (u *Upgrader)Upgrade(w http.ResponseWriter, req *http.Request,fn func(conn 
 	conn := newConn(netConn, true)
 	conn.State = Connected
 
-	//开启一个goroutine来处理fn
+
 	go func() {
 		defer func() {
 			//一旦某一个协程发生了panic而没有被捕获，那么导致整个go程序都会终止

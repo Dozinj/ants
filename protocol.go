@@ -194,7 +194,7 @@ func (f *Frame) genMaskingKey() {
 	f.MaskingKey = rand.Uint32()
 }
 
-// setPayload  自动屏蔽或取消屏蔽有效载荷数据
+// setPayload
 func (f *Frame) setPayload(payload []byte) *Frame {
 	f.Payload = make([]byte, len(payload))
 	copy(f.Payload, payload)

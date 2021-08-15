@@ -61,7 +61,7 @@ type Conn struct {
 	//read缓冲区长度
 	readBufferSize int
 	mu sync.Mutex
-	pongHandler func(payload string)
+
 
 	//心跳检测 pingTimes会在每次接受到数据帧时刷新为0
 	//同时连接者每5秒发送一个ping包,并让次数累加1，当pingTimes>=3时确定对方掉线
@@ -100,7 +100,6 @@ func (c *Conn)read(n int)([]byte,error) {
 	_, _ = c.bufR.Discard(len(p))
 	return p, nil
 }
-
 
 
 //解析websocket 数据帧
@@ -202,7 +201,7 @@ func (c *Conn)readFrame()(*Frame,error) {
 	case opCodePing:
 		err = c.pong([]byte("Pong"))
 	case opCodePong:
-		err = c.replyPong(frame)
+
 	case opCodeClose:
 		err = c.handleClose(frame)
 	default:
@@ -385,19 +384,6 @@ func (c *Conn) pong(pingPayload []byte) (err error) {
 	return c.writeControlFrame(opCodePong, pingPayload)
 }
 
-// replyPong frame MUST contains same payload with PING frame payload
-func (c *Conn) replyPong(frm *Frame) (err error) {
-	if c.pongHandler != nil {
-		c.pongHandler(string(frm.Payload))
-	}
-
-	return nil
-}
-
-// SetPongHandler .
-func (c *Conn) SetPongHandler(handler func(s string)) {
-	c.pongHandler = handler
-}
 
 // Close .
 func (c *Conn) Close() {
