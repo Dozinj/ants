@@ -128,24 +128,22 @@ type Frame struct {
 	//FIN表示帧结束   1 bit
 	//如果是0，表示这不是消息的最后一个分片。
 	//如果是1，表示这是消息的最后一个分片。
-	Fin    uint16
-
+	Fin uint16
 
 	//RSV是预留的空间，正常为0 ,1 bit
 	//如果收到一个非0值且没有协商的扩展定义这个非0值的含义，接收端就必须断开连接。
-	RSV1   uint16
-	RSV2   uint16
-	RSV3   uint16
+	RSV1 uint16
+	RSV2 uint16
+	RSV3 uint16
 
 	//opcode是标识数据类型的 4 bits
 	OpCode OpCode
-
 
 	//MASK标识这个数据帧的数据是否使用掩码 1 bit
 	//根据websocket定义：
 	//客户端发送数据需要进行掩码处理，接收数据无需反掩码操作
 	//服务端发送数据无需进行掩码处理，接收数据需要反掩码操作
-	Mask   uint16
+	Mask uint16
 
 	// Payload length:  7 bits, 7+16 bits, or 7+64 bits
 	//PayloadLen表示数据部分的长度。但是PayloadLen只有7位，换成无符号整型的话只有0到127的取值，
@@ -156,13 +154,12 @@ type Frame struct {
 	PayloadLen       uint16 // 7 bits
 	PayloadExtendLen uint64 // 64 bits
 
-
 	//MaskingKey由4个随机字节组成，储存掩码的实体部分。
 	//但是只有在前面的MASK被设置为1时候才存在这个数据
 	MaskingKey uint32 // 32 bits
 
 	//数据部分，如果掩码存在，那么所有数据都需要与掩码做一次异或运算，
-	Payload    []byte 
+	Payload []byte
 }
 
 //autoCalcPayloadLen 要确定负载数据长度，首先先判断第一个字节的值，
@@ -174,20 +171,19 @@ func (f *Frame) autoCalcPayloadLen() {
 		payloadLen       uint16
 		payloadExtendLen uint64
 	)
-	length:=uint64(len(f.Payload))
+	length := uint64(len(f.Payload))
 
 	// 设置有效载荷长度和有效载荷扩展长度
-	if length==1 &&f.Payload[0]<=125 { //0-125
+	if length == 1 && f.Payload[0] <= 125 { //0-125
 		payloadLen = uint16(f.Payload[0])
 		payloadExtendLen = 0
-	}else if length<(1<<16){ //后两字节
-		payloadLen=126
-		payloadExtendLen=uint64(len(f.Payload))
-	}else  {
-		payloadLen=127
-		payloadExtendLen=uint64(len(f.Payload))
+	} else if length < (1 << 16) { //后两字节
+		payloadLen = 126
+		payloadExtendLen = uint64(len(f.Payload))
+	} else {
+		payloadLen = 127
+		payloadExtendLen = uint64(len(f.Payload))
 	}
-
 
 	f.PayloadLen = payloadLen
 	f.PayloadExtendLen = payloadExtendLen
@@ -202,7 +198,6 @@ func (f *Frame) genMaskingKey() {
 func (f *Frame) setPayload(payload []byte) *Frame {
 	f.Payload = make([]byte, len(payload))
 	copy(f.Payload, payload)
-
 
 	if f.Mask == 1 {
 		//如果已设置掩码，则计算带有有效载荷的掩码密钥
@@ -219,8 +214,8 @@ func (f *Frame) setPayload(payload []byte) *Frame {
 func genMasks(maskingKey uint32) [4]byte {
 	//？ 应该最左边开始是第一字节
 	return [4]byte{
-		byte((maskingKey >> 24)& 0x00FF),
-		byte((maskingKey >> 16)& 0x00FF),
+		byte((maskingKey >> 24) & 0x00FF),
+		byte((maskingKey >> 16) & 0x00FF),
 		byte((maskingKey >> 8) & 0x00FF),
 		byte((maskingKey >> 0) & 0x00FF),
 	}
@@ -323,7 +318,7 @@ const (
 // 通过位运算将数据帧头部反序列化到frame结构体中
 func parseFrameHeader(header []byte) *Frame {
 	var (
-		f   = newFrame() //从对象池中获取
+		f     = newFrame() //从对象池中获取
 		part1 = binary.BigEndian.Uint16(header[:2])
 	)
 
@@ -340,16 +335,16 @@ func parseFrameHeader(header []byte) *Frame {
 
 // fragmentDataFrames 将data拆分为多个数据帧
 func fragmentDataFrames(data []byte, hasMask bool, opcode OpCode,frameSize int) []*Frame {
-	if frameSize==0{
+	if frameSize == 0 {
 		return nil
 	}
 	length := len(data)
 	start, end, n := 0, 0, length/frameSize
 
 	frames := make([]*Frame, 0, n+1)
-	for i := 1; i <=n; i++ {
+	for i := 1; i <= n; i++ {
 		start, end = (i-1)*frameSize, i*frameSize
-		f:=constructDataFrame(data[start:end],hasMask, opCodeContinuation)
+		f := constructDataFrame(data[start:end], hasMask, opCodeContinuation)
 		frames = append(frames, f)
 	}
 
@@ -359,7 +354,7 @@ func fragmentDataFrames(data []byte, hasMask bool, opcode OpCode,frameSize int) 
 
 	frames[0].OpCode = opcode
 	//将最后一帧的FIN 设为1
-	frames[len(frames)-1].Fin=1
+	frames[len(frames)-1].Fin = 1
 
 	return frames
 }

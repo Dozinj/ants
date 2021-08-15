@@ -65,23 +65,22 @@ func (u *Upgrader)selectSubProtocol(req *http.Request)string{
 
 //Upgrade http升级为websocket
 func (u *Upgrader)Upgrade(w http.ResponseWriter, req *http.Request,fn func(conn *Conn)) error {
-	if u.Timeout==0{
-		u.Timeout=defaultUpgradeTimeout
+	if u.Timeout == 0 {
+		u.Timeout = defaultUpgradeTimeout
 	}
-	if u.SubProtocols==nil{
-		u.SubProtocols=[]string{"chat"}
+	if u.SubProtocols == nil {
+		u.SubProtocols = []string{"chat"}
 	}
-	
-	ctx,cancel:=context.WithTimeout(req.Context(),u.Timeout)
+
+	ctx, cancel := context.WithTimeout(req.Context(), u.Timeout)
 	defer cancel()
-	req=req.WithContext(ctx)
+	req = req.WithContext(ctx)
 
-	
-	if status,reason:=checkReqHand(req);reason!=""{
-		return u.returnError(w,status,newHandshakeError(reason).Error())
+	if status, reason := checkReqHand(req); reason != "" {
+		return u.returnError(w, status, newHandshakeError(reason).Error())
 	}
 
-	protocol:=u.SubProtocols[0]
+	protocol := u.SubProtocols[0]
 	if u.CheckOrigin == nil {
 		u.CheckOrigin = func(req *http.Request) bool {
 			if len(req.Header["Origin"]) == 0 {
@@ -104,27 +103,25 @@ func (u *Upgrader)Upgrade(w http.ResponseWriter, req *http.Request,fn func(conn 
 	//Hijacker 接口由 ResponseWriters 实现，允许 HTTP 处理程序接管连接。
 	h, ok := w.(http.Hijacker)
 	if !ok {
-		return u.returnError(w, http.StatusInternalServerError,"http hijacker failed")
+		return u.returnError(w, http.StatusInternalServerError, "http hijacker failed")
 	}
-
 
 	//管理和关闭连接成为调用者的责任。
 	netConn, brw, err := h.Hijack()
 	if err != nil {
-		return u.returnError(w,http.StatusInternalServerError, err.Error())
+		return u.returnError(w, http.StatusInternalServerError, err.Error())
 	}
 
 	if brw.Reader.Buffered() > 0 {
 		//返回的 bufio.Reader 可能包含来自客户端的未处理的缓冲数据。
 		//握手期间不能传输数据
 		netConn.Close()
-		return  errors.New("websocket: chat_client sent data before handshake is complete")
+		return errors.New("websocket: chat_client sent data before handshake is complete")
 	}
 
-
 	//Hijack之后不能再对w http.responsewriter里面的w写入数据；
-	secKey:=req.Header.Get("Sec-WebSocket-Key")
-	p:=make([]byte,0,1024)
+	secKey := req.Header.Get("Sec-WebSocket-Key")
+	p := make([]byte, 0, 1024)
 	p = append(p, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "...)
 	p = append(p, encryptionkey(secKey)...)
 	p = append(p, "\r\nSec-WebSocket-Protocol: "...)
@@ -133,11 +130,11 @@ func (u *Upgrader)Upgrade(w http.ResponseWriter, req *http.Request,fn func(conn 
 
 	if _, err = netConn.Write(p); err != nil {
 		netConn.Close()
-		return  err
+		return err
 	}
 
 	conn := newConn(netConn, true)
-	conn.State=Connected
+	conn.State = Connected
 
 	//开启一个goroutine来处理fn
 	go func() {
@@ -151,37 +148,37 @@ func (u *Upgrader)Upgrade(w http.ResponseWriter, req *http.Request,fn func(conn 
 
 		fn(conn)
 	}()
-	return  nil
+	return nil
 }
 
 func checkHeader( req *http.Request,key,value string)bool {
-	if len(req.Header[key]) !=1 {
+	if len(req.Header[key]) != 1 {
 		return false
 	}
 	return strings.EqualFold(req.Header[key][0], value)
 }
 
-func checkReqHand(req *http.Request) (status int, reason string){
+func checkReqHand(req *http.Request) (status int, reason string) {
 	//验证请求方法
 	if req.Method != http.MethodGet {
 		return http.StatusMethodNotAllowed, "not get method"
 	}
 	//检查请求头信息
-	if !checkHeader(req, "Upgrade", "websocket"){
-		return http.StatusBadRequest,"invalid Upgrade field which should be websocket"
+	if !checkHeader(req, "Upgrade", "websocket") {
+		return http.StatusBadRequest, "invalid Upgrade field which should be websocket"
 	}
 
-	if !checkHeader(req, "Connection", "Upgrade"){
-		return http.StatusBadRequest,"invalid Connection field which should be Upgrade "
+	if !checkHeader(req, "Connection", "Upgrade") {
+		return http.StatusBadRequest, "invalid Connection field which should be Upgrade "
 	}
 
-	if !checkHeader(req, "Sec-Websocket-Version", DefaultWebsocketVersion){
-		return http.StatusBadRequest,"invalid Sec-WebSocket-Version field which should be 13 "
+	if !checkHeader(req, "Sec-Websocket-Version", DefaultWebsocketVersion) {
+		return http.StatusBadRequest, "invalid Sec-WebSocket-Version field which should be 13 "
 	}
 
 	if req.Header.Get("Sec-WebSocket-Key") == "" {
-		return http.StatusBadRequest,"webSocket key is not allowed to be empty"
+		return http.StatusBadRequest, "webSocket key is not allowed to be empty"
 	}
-	return 0,""
+	return 0, ""
 }
 

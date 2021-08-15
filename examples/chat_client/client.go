@@ -23,17 +23,16 @@ func main() {
 			time.Sleep(1 * time.Second)
 		}
 	}()
-
 	for {
 		mt, msg, err := conn.ReadMessage()
 		if err != nil {
 			if ce, ok := err.(*ants.CloseError); ok {
 				fmt.Printf("close err=%d, %s\n", ce.Code, ce.Text)
-				return
+				break
 			}
 			fmt.Printf("recv failed, err=%v\n", err)
 			time.Sleep(1 * time.Second)
-			return
+			break
 		}
 		fmt.Printf("messageType=%d, msg=%s\n", mt, msg)
 	}

@@ -24,7 +24,7 @@ const (
 var (
 	ErrMaskNotSet = errors.New("mask is not set")
 	ErrMaskSet    = errors.New("mask is set")
-	ErrNilRead =errors.New("conn is closed")
+	ErrNilRead    = errors.New("the other party has dropped the line")
 )
 
 
@@ -47,7 +47,7 @@ const (
 )
 
 const defaultReadSize =65535
-
+const defaultDuration =5*time.Second
 
 type Conn struct {
 	conn     net.Conn
@@ -62,6 +62,10 @@ type Conn struct {
 	readBufferSize int
 	mu sync.Mutex
 	pongHandler func(payload string)
+
+	//心跳检测 pingTimes会在每次接受到数据帧时刷新为0
+	//同时连接者每5秒发送一个ping包,并让次数累加1，当pingTimes>=3时确定对方掉线
+	pingTimes int
 }
 
 func newConn(netConn net.Conn,isServer bool)*Conn {
@@ -73,26 +77,28 @@ func newConn(netConn net.Conn,isServer bool)*Conn {
 		isServer: isServer,
 		State: Connecting,
 		readBufferSize: defaultReadSize,//to fix bug
+		pingTimes: 0,
 	}
 
+	go conn.HeartBeat()//进行心跳检测
 	return conn
 }
 
 //read Peek返回接下来的n个字节，而不推进读取器。
 //调用Peek可防止未读字节或未读字节调用成功，直到下一次读取操作
-func (c *Conn)read(n int)([]byte,error){
-	p,err:=c.bufR.Peek(n)
-	if err==io.EOF{
+func (c *Conn)read(n int)([]byte,error) {
+	p, err := c.bufR.Peek(n)
+	if err == io.EOF {
 		return nil, err
 	}
 
-	if len(p)==0{
-		return nil,ErrNilRead
+	if len(p) == 0 {
+		return nil, ErrNilRead
 	}
 
 	//缓冲区移除字节
-	_,_=c.bufR.Discard(len(p))
-	return p,nil
+	_, _ = c.bufR.Discard(len(p))
+	return p, nil
 }
 
 
@@ -109,7 +115,7 @@ func (c *Conn)readFrame()(*Frame,error) {
 	//获取数据帧头部的前两字节    fin+rev1+rev2+rev3+mask+payloadLen
 	frame := parseFrameHeader(p)
 
-	var payloadExtendLen uint64 =0//若PayloadLen<126 则为0
+	var payloadExtendLen uint64 = 0 //若PayloadLen<126 则为0
 
 	//PayloadLen
 	switch frame.PayloadLen {
@@ -121,9 +127,9 @@ func (c *Conn)readFrame()(*Frame,error) {
 		}
 
 		//计算payloadExtendLen
-		first:=uint64(p[0])*256
-		second:=uint64(p[1])
-		payloadExtendLen=first+second
+		first := uint64(p[0]) * 256
+		second := uint64(p[1])
+		payloadExtendLen = first + second
 
 	case 127:
 		//当payloadExtendLen>65535 即payload 大于65535 字节时
@@ -132,10 +138,10 @@ func (c *Conn)readFrame()(*Frame,error) {
 		if err != nil {
 			return nil, err
 		}
-		for i:=0;i<len(p);i++{
+		for i := 0; i < len(p); i++ {
 			//[]byte{8 ,7, 6, 5, 4, 3, 2, 1}   256=1<<8  256*2=1<<16
 			//payloadExtendLen = 1 + 2*256 + 3*256*2 +...+ 8*256*7
-			payloadExtendLen+=uint64(p[i])*uint64(1<<8*i)
+			payloadExtendLen += uint64(p[i]) * uint64(1<<8*i)
 		}
 	default:
 		//0-125 payloadExtendLen 默认为0
@@ -152,7 +158,6 @@ func (c *Conn)readFrame()(*Frame,error) {
 		frame.MaskingKey = binary.BigEndian.Uint32(p)
 	}
 
-
 	//验证协议基本规范
 	if err = frame.valid(); err != nil {
 		c.close(CloseProtocolError)
@@ -165,13 +170,13 @@ func (c *Conn)readFrame()(*Frame,error) {
 	}
 
 	//负载数据 通过数据帧中定义长度分配容量 payload最少也有1Byte
-	if payloadExtendLen==0{
-		payloadExtendLen=1
+	if payloadExtendLen == 0 {
+		payloadExtendLen = 1
 	}
 
 	payload := make([]byte, 0, payloadExtendLen)
 
-	for payloadExtendLen > uint64(c.readBufferSize){
+	for payloadExtendLen > uint64(c.readBufferSize) {
 		p, err := c.read(c.readBufferSize)
 		if err != nil {
 			return nil, err
@@ -180,7 +185,6 @@ func (c *Conn)readFrame()(*Frame,error) {
 		payloadExtendLen -= uint64(c.readBufferSize)
 	}
 
-
 	//读取剩余部分
 	p, err = c.read(int(payloadExtendLen))
 	if err != nil {
@@ -188,17 +192,15 @@ func (c *Conn)readFrame()(*Frame,error) {
 	}
 	payload = append(payload, p...)
 
-
 	//将读取到的负载数据写入结构体  包含掩码解密过程(如果需要)
-	frame=frame.setPayload(payload)
-
+	frame = frame.setPayload(payload)
 
 	//判断消息类型
 	switch frame.OpCode {
 	case opCodeText, opCodeBinary, opCodeContinuation:
-		//todo 可以做个心跳机制
+
 	case opCodePing:
-		err = c.replyPing(frame)
+		err = c.pong([]byte("Pong"))
 	case opCodePong:
 		err = c.replyPong(frame)
 	case opCodeClose:
@@ -207,7 +209,8 @@ func (c *Conn)readFrame()(*Frame,error) {
 		return nil, errors.New("unsupported frame messageType")
 	}
 
-	return frame,nil
+	c.pingTimes=0 //todo 刷新ping次数
+	return frame, err
 }
 
 //sendFrame 发送单个数据帧
@@ -236,7 +239,7 @@ func(c *Conn)writeDataframe(data []byte,mt MessageType)error {
 	if len(data) > c.readBufferSize {
 		frames := fragmentDataFrames(data, !c.isServer, OpCode(mt), c.readBufferSize)
 
-		if frames==nil{
+		if frames == nil {
 			return errors.New("fragmentDataFrames construct nil")
 		}
 		for _, frame := range frames {
@@ -248,7 +251,7 @@ func(c *Conn)writeDataframe(data []byte,mt MessageType)error {
 	}
 
 	//数据较小仅封装一次
-	frame := constructDataFrame( data,!c.isServer,OpCode(mt))
+	frame := constructDataFrame(data, !c.isServer, OpCode(mt))
 	if err := c.sendFrame(frame); err != nil {
 		return err
 	}
@@ -256,15 +259,15 @@ func(c *Conn)writeDataframe(data []byte,mt MessageType)error {
 }
 
 //writeControlFrame 发送控制帧 	PING|PONG|CLOSE
-func (c *Conn)writeControlFrame(code OpCode,data []byte)error{
-	frame:=constructControlFrame(code,!c.isServer,data)
+func (c *Conn)writeControlFrame(code OpCode,data []byte)error {
+	frame := constructControlFrame(code, !c.isServer, data)
 	return c.sendFrame(frame)
 }
 
 //读取消息
 func(c *Conn)ReadMessage()(mt MessageType,data []byte,err error) {
-	if !c.Connect() {
-		return 0, nil, errors.New("conn is not connecting")
+	if !c.Connect(){
+		return 0,nil,errors.New("对方已掉线")
 	}
 	frame, err := c.readFrame()
 	if err != nil {
@@ -293,58 +296,61 @@ func(c *Conn)ReadMessage()(mt MessageType,data []byte,err error) {
 }
 
 //WriteMessage 支持text,binary
-func (c *Conn)WriteMessage(mt MessageType,data []byte) error{
+func (c *Conn)WriteMessage(mt MessageType,data []byte) error {
 	if !c.Connect(){
-		return errors.New("conn is not connecting")
+		return errors.New("对方已掉线")
 	}
-	if mt!=TextMessage&&mt!=BinaryMessage{
-		return errors.New("only TextMessage type are supported")
+	if mt != TextMessage && mt != BinaryMessage {
+		return c.writeControlFrame(OpCode(mt),data)
 	}
-	return c.writeDataframe(data,mt)
+	return c.writeDataframe(data, mt)
 }
 
-func (c *Conn)SendFile(r io.Reader)error{
+func (c *Conn)SendFile(r io.Reader)error {
 	if !c.Connect(){
-		return errors.New("conn is not connecting")
+		return errors.New("对方已掉线")
 	}
-	data,err:=ioutil.ReadAll(r)
-	if err!=nil{
+	data, err := ioutil.ReadAll(r)
+	if err != nil {
 		return err
 	}
-	return c.writeDataframe(data,BinaryMessage)
+	return c.writeDataframe(data, BinaryMessage)
 }
 
-func (c *Conn)AcceptFile(filepath string)error{
-	fd, err:= os.OpenFile(filepath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
-	if err!=nil{
+func (c *Conn)AcceptFile(filepath string)error {
+	if !c.Connect(){
+		return errors.New("对方已掉线")
+	}
+	fd, err := os.OpenFile(filepath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
+	if err != nil {
 		return err
 	}
 	return c.acceptFile(fd)
 }
 
-func (c *Conn)acceptFile(fd *os.File)error{
+func (c *Conn)acceptFile(fd *os.File)error {
 	frame, err := c.readFrame()
 	if err != nil {
-		return  err
+		return err
 	}
 	mt := MessageType(frame.OpCode)
-	if mt!=BinaryMessage{
+	if mt != BinaryMessage {
 		return errors.New("messageType is ont BinaryMessage")
 	}
 
-	_,err=fd.Write(frame.Payload)
-	if err!=nil{
+	_, err = fd.Write(frame.Payload)
+	if err != nil {
 		return err
 	}
 
 	//判断是不是最后一个数据分片
-	for  !frame.isFinal() {
+	for !frame.isFinal() {
 		frame, err = c.readFrame() //fix bug
 		if err != nil {
-			return  err
+			return err
 		}
-		_,err=fd.Write(frame.Payload)
-		if err!=nil{
+		_, err = fd.Write(frame.Payload)
+		if err != nil {
 			return err
 		}
 	}
@@ -369,15 +375,9 @@ func (c *Conn) handleClose(frm *Frame) error {
 	return err
 }
 
-// Ping conn send a ping packet to another side.
+// Ping conn 向另一端发送 ping 数据包。
 func (c *Conn) Ping() (err error) {
 	return c.writeControlFrame(opCodePing, []byte("ping"))
-}
-
-// replyPing work for Conn to reply ping packet. frame MUST contains 125 Byte or-
-// less payload.
-func (c *Conn) replyPing(frm *Frame) (err error) {
-	return c.pong(frm.Payload)
 }
 
 // pong .
@@ -387,7 +387,6 @@ func (c *Conn) pong(pingPayload []byte) (err error) {
 
 // replyPong frame MUST contains same payload with PING frame payload
 func (c *Conn) replyPong(frm *Frame) (err error) {
-	// if receive pong frame, try to call pongHandler
 	if c.pongHandler != nil {
 		c.pongHandler(string(frm.Payload))
 	}
@@ -395,35 +394,33 @@ func (c *Conn) replyPong(frm *Frame) (err error) {
 	return nil
 }
 
-// SetPongHandler handler would be called while the Conn
+// SetPongHandler .
 func (c *Conn) SetPongHandler(handler func(s string)) {
 	c.pongHandler = handler
 }
 
 // Close .
 func (c *Conn) Close() {
-	c.State = Closing
 	if err := c.close(CloseAbnormalClosure); err != nil {
 		fmt.Printf("Conn.Close failed to close, err=%v", err)
 	}
 }
 
 func (c *Conn) close(closeCode int) error {
-	p := make([]byte, 2, 16)
+	p := make([]byte, 2)
 	closeErr := &CloseError{Code: closeCode}
 	binary.BigEndian.PutUint16(p[:2], uint16(closeCode))
 	p = append(p, []byte(closeErr.Error())...)
-
 
 	if err := c.writeControlFrame(opCodeClose, p); err != nil {
 		return err
 	}
 
 	if c.conn != nil {
-		// close underlying TCP connection
+		// 关闭底层tcp连接
 		defer func() { _ = c.conn.Close() }()
 	}
-	// update Conn's State to 'Closed'
+
 	c.State = Closed
 	return nil
 }
@@ -469,3 +466,20 @@ func(c *Conn)SetDeadline(t time.Time)error {
 	return c.conn.SetDeadline(t)
 }
 
+
+func (c *Conn)HeartBeat(){
+	timer:=time.NewTimer(defaultDuration)
+	for {
+		select {
+		case <-timer.C:
+			if c.pingTimes>=3{
+				//对方掉线，即将关闭conn
+				c.State=Closing
+				return
+			}
+			_=c.Ping()
+			timer.Reset(defaultDuration)
+			c.pingTimes++
+		}
+	}
+}

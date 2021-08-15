@@ -16,6 +16,7 @@ type fields struct {
 	isServer       bool
 	State          string
 	readBufferSize int
+	pingTimes       int
 }
 
 func newField()fields{
@@ -27,6 +28,7 @@ func newField()fields{
 		State: Connected,
 		isServer: true,
 		readBufferSize: defaultReadSize,
+		pingTimes: 0,
 	}
 }
 
@@ -133,12 +135,6 @@ func TestConn_writeDataframe(t *testing.T) {
 	}
 }
 
-
-//func mockFrame(payload []byte) *Frame {
-//	if frm.Mask == 1 {
-//		(&frm).genMaskingKey()
-//	}
-//}
 
 
 func TestConn_sendFrame_and_readFrames(t *testing.T) {
@@ -435,3 +431,29 @@ func TestConn_close(t *testing.T) {
 	}
 }
 
+func TestConn_HeartBeat(t *testing.T) {
+	tests := []struct {
+		name   string
+		fields fields
+	}{
+		{
+			name: "test1",
+			fields:newField() ,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Conn{
+				conn:           tt.fields.conn,
+				bufR:           tt.fields.bufR,
+				bufW:           tt.fields.bufW,
+				isServer:       tt.fields.isServer,
+				State:          tt.fields.State,
+				readBufferSize: tt.fields.readBufferSize,
+				pingTimes:      tt.fields.pingTimes,
+			}
+			c.HeartBeat()
+			fmt.Println(c.State)
+		})
+	}
+}
